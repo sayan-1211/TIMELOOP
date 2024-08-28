@@ -1,0 +1,118 @@
+`timescale 1ns / 1ps
+
+module TX_FPGA(
+    input wire clk,            // Clock signal
+    input wire rst,            // Reset signal
+    input wire tx_start,       // Signal to start transmission
+    input wire [7:0] tx_data,  // 8-bit data to transmit
+    output reg tx,             // UART transmit line
+    output reg tx_done         // Transmission done signal
+);
+
+    // UART parameters
+    parameter BAUD_RATE = 9600; // Assuming a 50 MHz clock and 9600 baud rate
+    parameter CLOCK_FREQ = 50000000; // 50 MHz clock frequency
+    parameter BAUD_DIV = CLOCK_FREQ / BAUD_RATE;
+
+    // State encoding
+    parameter IDLE = 3'b000, START = 3'b001, DATA = 3'b010, STOP = 3'b011;
+    reg [2:0] state, next_state;
+    reg [15:0] baud_counter;    // Baud rate counter
+    reg [3:0] bit_index;        // Bit index for transmission
+    reg [7:0] tx_shift_reg;     // Shift register for data transmission
+
+    always @(posedge clk or posedge rst) 
+    begin
+        if (rst) 
+        begin
+            state <= IDLE;
+            baud_counter <= 16'b0;
+            bit_index <= 4'b0;
+            tx <= 1'b1; // Idle state for UART is high
+            tx_done <= 1'b0;
+        end 
+        else 
+        begin
+            state <= next_state;
+            if (baud_counter == (BAUD_DIV - 1)) 
+            begin
+                baud_counter <= 16'b0;
+                if (state == DATA) 
+                begin
+                    tx <= tx_shift_reg[0];
+                    tx_shift_reg <= {1'b1, tx_shift_reg[7:1]}; // Shift data
+                    bit_index <= bit_index + 1;
+                    if (bit_index == 4'd8) 
+                    begin
+                        tx_done <= 1'b1;
+                    end
+                end
+            end 
+            else 
+            begin
+                baud_counter <= baud_counter + 1;
+            end
+        end
+    end
+
+    always @(*) 
+    begin
+    
+        case (state)
+            IDLE: 
+            begin
+                tx_done = 1'b0;
+                if (tx_start) 
+                begin
+                    next_state = START;
+                    tx_shift_reg = tx_data;
+                    bit_index = 4'b0;
+                end 
+                else 
+                begin
+                    next_state = IDLE;
+                end
+            end
+            
+            START: 
+            begin
+                tx_done = 1'b0;
+                if (baud_counter == (BAUD_DIV - 1)) 
+                begin
+                    next_state = DATA;
+                end 
+                else 
+                begin
+                    next_state = START;
+                end
+            end
+            
+            DATA: 
+            begin
+                if (bit_index == 4'd8 && baud_counter == (BAUD_DIV - 1)) 
+                begin
+                    next_state = STOP;
+                end 
+                else 
+                begin
+                    next_state = DATA;
+                end
+            end
+            
+            STOP: 
+            begin
+                if (baud_counter == (BAUD_DIV - 1)) 
+                begin
+                    next_state = IDLE;
+                end 
+                else 
+                begin
+                    next_state = STOP;
+                end
+            end
+            
+            default: next_state = IDLE;
+            
+        endcase
+    end
+endmodule
