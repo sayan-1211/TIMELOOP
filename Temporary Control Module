@@ -1,0 +1,184 @@
+`timescale 1ns / 1ps
+
+module TimeLoop (
+    input wire clk,
+    input wire rst,
+    input wire send_mode,      // Pushbutton for sending mode
+    input wire receive_mode,   // Pushbutton for receiving mode
+    input wire input_mode,     // Pushbutton for input mode
+    input wire output_mode,    // Pushbutton for output mode
+    input wire scramble_mode,  // Pushbutton for scramble mode
+    output reg sending_led,    // LED for sending mode
+    output reg receiving_led,  // LED for receiving mode
+    output reg active_led,     // LED to indicate active state
+    output wire tx,            // UART Transmit line
+    input wire rx,             // UART Receive line
+    output reg [15:0] data_in, // 16-bit data to transmit
+    input wire [15:0] data_out // 16-bit received data
+);
+
+    // State encoding
+    parameter IDLE = 3'b000, SEND = 3'b001, RECEIVE = 3'b010, INPUT = 3'b011, OUTPUT = 3'b100, SCRAMBLE = 3'b101;
+
+    reg [2:0] state, next_state;
+    reg active;  // Indicates whether the system is in an active mode
+
+    // Instantiate UART transceiver
+    Transceiver uart_transceiver (
+        .clk(clk),
+        .rst(rst),
+        .tx_button(sending_led), // Use sending_led to control transmission
+        .rx_button(receiving_led), // Use receiving_led to control reception
+        .data_in(data_in),        // Data to transmit
+        .tx(tx),                  // UART Transmit line
+        .rx(rx),                  // UART Receive line
+        .data_out(data_out)       // Received data
+    );
+
+    // State transition
+    always @(posedge clk or posedge rst) 
+    begin
+        if (rst) 
+        begin
+            state <= IDLE;
+            active <= 1'b0;
+        end 
+        else 
+        begin
+            state <= next_state;
+        end
+    end
+
+    // State transition logic
+    always @(*) begin
+        next_state = state;
+        active = 1'b0;  // Default to inactive
+
+        case (state)
+            IDLE: 
+            begin
+                if (send_mode) 
+                begin
+                    next_state = SEND;
+                end 
+                else if (receive_mode) 
+                begin
+                    next_state = RECEIVE;
+                end 
+                else 
+                begin
+                    next_state = IDLE;
+                end
+            end
+            
+            SEND: 
+            begin
+                active = 1'b1;  // Set active for sending mode
+                if (input_mode) 
+                begin
+                    next_state = INPUT;
+                end 
+                else if (receive_mode) 
+                begin
+                    next_state = RECEIVE;
+                end 
+                else if (rst) 
+                begin
+                    next_state = IDLE;
+                end
+            end
+                
+            RECEIVE: 
+            begin
+                active = 1'b1;  // Set active for receiving mode
+                if (input_mode) 
+                begin
+                    next_state = INPUT;
+                end 
+                else if (send_mode) 
+                begin
+                    next_state = SEND;
+                end 
+                else if (rst) 
+                begin
+                    next_state = IDLE;
+                end
+            end
+            
+            INPUT: 
+            begin
+                active = 1'b1;  // Set active for input mode
+                if (scramble_mode) 
+                begin
+                    next_state = SCRAMBLE;
+                end 
+                else if (send_mode) 
+                begin
+                    next_state = SEND;
+                end 
+                else if (receive_mode) 
+                begin
+                    next_state = RECEIVE;
+                end 
+                else if (rst) 
+                begin
+                    next_state = IDLE;
+                end
+            end
+            
+            SCRAMBLE: 
+            begin
+                active = 1'b1;  // Set active for scramble mode
+                if (output_mode) 
+                begin
+                    next_state = OUTPUT;
+                end 
+                else if (send_mode) 
+                begin
+                    next_state = SEND;
+                end 
+                else if (receive_mode) 
+                begin
+                    next_state = RECEIVE;
+                end 
+                else if (rst) 
+                begin
+                    next_state = IDLE;
+                end
+            end
+            
+            OUTPUT: 
+            begin
+                active = 1'b1;  // Set active for output mode
+                if (send_mode) 
+                begin
+                    next_state = SEND;
+                end 
+                else if (receive_mode) 
+                begin
+                    next_state = RECEIVE;
+                end 
+                else if (rst) 
+                begin
+                    next_state = IDLE;
+                end
+            end
+            
+            default: 
+                next_state = IDLE;
+        endcase
+    end
+
+    // LED indicators
+    always @(*) 
+    begin
+        sending_led = (state == SEND && active);
+        receiving_led = (state == RECEIVE && active);
+    end
+
+    // Active LED
+    always @(*) 
+    begin
+        active_led = active;
+    end
+endmodule
