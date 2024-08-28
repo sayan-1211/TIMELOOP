@@ -1,0 +1,123 @@
+`timescale 1ns / 1ps
+
+module Transceiver(
+    input wire clk,
+    input wire rst,
+    input wire tx_button,         // Button to start transmission
+    input wire rx_button,         // Button to start reception
+    input wire [15:0] data_in,    // 16-bit data to transmit
+    output wire tx,               // UART Transmit line
+    input wire rx,                // UART Receive line
+    output reg [15:0] data_out    // 16-bit received data
+);
+
+    reg [7:0] tx_data;            // 8-bit data for transmission
+    reg [7:0] received_byte;      // 8-bit received data
+    reg tx_active;                // Indicates if transmission is active
+    reg [1:0] tx_state;           // State for transmission of 16-bit data
+    reg [1:0] rx_state;           // State for reception of 16-bit data
+
+    wire tx_done;                 // Transmission completion signal
+    wire rx_done;                 // Reception completion signal
+
+    // Instantiate UART transmitter
+    TX_FPGA uart_tx (
+        .clk(clk),
+        .rst(rst),
+        .tx_start(tx_active),
+        .tx_data(tx_data),
+        .tx(tx),
+        .tx_done(tx_done)
+    );
+
+    // Instantiate UART receiver
+    RX_FPGA uart_rx (
+        .clk(clk),
+        .rst(rst),
+        .rx(rx),
+        .rx_data(received_byte),
+        .rx_done(rx_done)
+    );
+
+    // State machine for transmitting 16-bit data as two 8-bit packets
+    always @(posedge clk or posedge rst) 
+    begin
+        if (rst) 
+        begin
+            tx_state <= 2'b00;
+            tx_active <= 1'b0;
+        end 
+        else if (tx_button && !tx_active) 
+        begin
+        
+            case (tx_state)
+                2'b00: 
+                begin
+                    tx_data <= data_in[7:0];  // Transmit lower 8 bits
+                    tx_active <= 1'b1;
+                    tx_state <= 2'b01;
+                end
+                
+                2'b01: 
+                begin
+                    if (tx_done) 
+                    begin
+                        tx_data <= data_in[15:8]; // Transmit upper 8 bits
+                        tx_active <= 1'b1;
+                        tx_state <= 2'b10;
+                    end
+                end
+                
+                2'b10: 
+                begin
+                    if (tx_done) 
+                    begin
+                        tx_active <= 1'b0;
+                        tx_state <= 2'b00;
+                    end
+                end
+            endcase
+        end 
+        else if (tx_done) 
+        begin
+            tx_active <= 1'b0;
+        end
+    end
+
+    // State machine for receiving 16-bit data as two 8-bit packets
+    always @(posedge clk or posedge rst) begin
+        if (rst) 
+        begin
+            rx_state <= 2'b00;
+            data_out <= 16'b0;
+        end 
+        else if (rx_button) 
+        begin
+        
+            case (rx_state)
+                2'b00: 
+                begin
+                    if (rx_done) 
+                    begin
+                        data_out[7:0] <= received_byte; // Store lower 8 bits
+                        rx_state <= 2'b01;
+                    end
+                end
+                
+                2'b01: 
+                begin
+                    if (rx_done) 
+                    begin
+                        data_out[15:8] <= received_byte; // Store upper 8 bits
+                        rx_state <= 2'b10;
+                    end
+                end
+                
+                2'b10: 
+                begin
+                    rx_state <= 2'b00;
+                end
+            endcase
+        end
+    end
+endmodule
